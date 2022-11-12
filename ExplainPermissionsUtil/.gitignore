@@ -1,0 +1,10 @@
+# Gradle files
+.gradle/
+build/
+
+local.properties
+
+*.iml
+.idea
+
+priguardMapping.txt

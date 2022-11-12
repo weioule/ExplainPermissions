@@ -1,0 +1,3 @@
+rootProject.name = "ExplainPermissions"
+include ':app'
+include ':ExplainPermissionsUtil'
