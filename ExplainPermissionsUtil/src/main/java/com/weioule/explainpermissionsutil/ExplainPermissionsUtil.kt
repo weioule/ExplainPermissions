@@ -231,6 +231,7 @@ class ExplainPermissionsUtil : AppCompatActivity() {
             if (isAllGranted) {
                 //已全部授予权限
                 if (null != callback) callback!!.onCallback(true as Nothing)
+                toFinish()
             } else {
                 var shouldShow = true
                 for (permission in permissions) {
