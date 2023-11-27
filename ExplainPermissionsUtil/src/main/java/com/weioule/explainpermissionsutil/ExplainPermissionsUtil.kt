@@ -1,18 +1,13 @@
 package com.weioule.explainpermissionsutil
 
+import android.app.AlertDialog
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
-import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.provider.Settings
-import android.text.TextUtils
-import android.view.LayoutInflater
 import android.view.View
-import android.view.ViewGroup
 import android.view.WindowManager
-import android.widget.LinearLayout
 import androidx.annotation.RequiresApi
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
@@ -23,7 +18,7 @@ import androidx.recyclerview.widget.RecyclerView
 import com.chad.library.adapter.base.BaseQuickAdapter
 import com.chad.library.adapter.base.viewholder.BaseViewHolder
 import java.io.Serializable
-import java.util.*
+import java.util.Calendar
 
 /**
  * Author by weioule.
@@ -31,86 +26,80 @@ import java.util.*
  */
 class ExplainPermissionsUtil : AppCompatActivity() {
 
-    private var delay: Long = 0
+    private val PERMISSION_REQUEST = 18118
     private var toSetting = false
-    private var callback: Callback<*>? = null
-    private lateinit var permissions: Array<String?>
-    private var refusedDialog: TitleMsgDialog? = null
-    private var refusedAgainDialog: TitleMsgDialog? = null
-    private var explainList: List<ExplainBean>? = null
+
+    //需要申请的权限字符串数组
+    private lateinit var permissions: Array<String>
+    private lateinit var recyclerView: RecyclerView
+    private var callback: Callback<Boolean>? = null
+
+    //用于展示未授予的权限列表数据
+    private var explainList: MutableList<ExplainBean> = mutableListOf()
+
+    //原始的列表数据，因为跳转系统设置页面可以授予也可以取消权限，用于返回页面时同步更新所有权限状态
+    private var primitiveExplainList: MutableList<ExplainBean> = mutableListOf()
 
     companion object {
-        private const val MIN_CLICK_DELAY_TIME = 1000
         private var lastClickTime: Long = 0
-        private const val PERMISSION_REQUEST = 18118
-        private const val DELAY = "delay"
-        private const val CALLBACK_KEY = "callback_key"
+        private const val MIN_CLICK_DELAY_TIME = 800
+        private const val CALLBACK = "callback"
         private const val EXPLAIN_LIST = "explain_list"
-        private val callbackMap: MutableMap<Long, Callback<*>> = HashMap()
 
         @JvmOverloads
-        fun requestPermissionsNoDoubleClick(
+        fun requestPermission(
             activity: FragmentActivity,
             bean: ExplainBean,
-            callback: Callback<Boolean?>,
-            delay: Long = 200
+            callback: Callback<Boolean>?
         ) {
-            val list = ArrayList<ExplainBean>()
-            list.add(bean)
-            requestPermissionsNoDoubleClick(activity, list, callback, delay)
+            var permissionList = mutableListOf<ExplainBean>()
+            permissionList.add(bean)
+            requestPermissions(activity, permissionList, callback)
         }
 
         @JvmOverloads
-        fun requestPermissionsNoDoubleClick(
+        fun requestPermissions(
             activity: FragmentActivity,
-            list: List<ExplainBean>?,
-            callback: Callback<Boolean?>,
-            delay: Long = 200
+            permissionList: MutableList<ExplainBean>,
+            callback: Callback<Boolean>?
         ) {
             //过滤重复点击
             val currentTime = Calendar.getInstance().timeInMillis
             if (currentTime - lastClickTime > MIN_CLICK_DELAY_TIME) {
                 lastClickTime = currentTime
-                requestPermissions(activity, list, callback, delay)
+
+                if (permissionList.isNullOrEmpty()) {
+                    throw RuntimeException("The permission list cannot be empty.")
+                }
+
+                var hasAllPermission = true
+                for (explainBean in permissionList) {
+                    val permissionCheck =
+                        ContextCompat.checkSelfPermission(activity, explainBean.permission)
+                    if (permissionCheck == PackageManager.PERMISSION_DENIED) {
+                        hasAllPermission = false
+                        break
+                    }
+                }
+
+                //检验权限是否已授予
+                if (hasAllPermission) {
+                    callback?.onCallback(true)
+                    return
+                }
+
+                val intent = Intent(activity, ExplainPermissionsUtil::class.java)
+                val bundle = Bundle()
+                //这里需要注意：callback需要序列化，在外部使用匿名内部类的形式传进来的callback，因为它持有外部类的引用，外部类也需要序列化，不然会传递不过去，所以我们的MainActivity也实现了Serializable接口
+                bundle.putSerializable(CALLBACK, callback as Serializable?)
+                bundle.putSerializable(EXPLAIN_LIST, permissionList as Serializable?)
+
+                intent.putExtras(bundle)
+                activity.startActivity(intent)
+
+                //取消页面启动动画，提升用户体验
+                activity.overridePendingTransition(0, 0)
             }
-        }
-
-        @JvmOverloads
-        fun requestPermissions(
-            activity: FragmentActivity,
-            bean: ExplainBean,
-            callback: Callback<Boolean?>,
-            delay: Long = 200
-        ) {
-            val list = ArrayList<ExplainBean>()
-            list.add(bean)
-            requestPermissions(activity, list, callback, delay)
-        }
-
-        /**
-         * @param list     权限与使用说明集合
-         * @param callback 权限授予结果回调
-         * @param delay    权限是否被拒绝的结果等待时间
-         */
-        @JvmOverloads
-        fun requestPermissions(
-            activity: FragmentActivity,
-            list: List<ExplainBean>?,
-            callback: Callback<Boolean?>,
-            delay: Long = 200
-        ) {
-            val intent = Intent(activity, ExplainPermissionsUtil::class.java)
-            val bundle = Bundle()
-            val currentTimeMillis = System.currentTimeMillis()
-            callbackMap[currentTimeMillis] = callback
-            bundle.putLong(DELAY, delay)
-            bundle.putLong(CALLBACK_KEY, currentTimeMillis)
-            bundle.putSerializable(EXPLAIN_LIST, list as Serializable?)
-            intent.putExtras(bundle)
-            activity.startActivity(intent)
-
-            //取消页面启动动画，提升用户体验
-            activity.overridePendingTransition(0, 0)
         }
     }
 
@@ -131,83 +120,53 @@ class ExplainPermissionsUtil : AppCompatActivity() {
             window.navigationBarColor = Color.TRANSPARENT
         }
 
-        setContentView(R.layout.reqest_permissions_activity)
-        val contentView = findViewById<ViewGroup>(R.id.content)
+        setContentView(R.layout.permissions_explain_activity)
 
-        val callbackKey = intent.getLongExtra(CALLBACK_KEY, 0)
-        callback = callbackMap[callbackKey]
-        callbackMap.remove(callbackKey)
-        delay = intent.getLongExtra(DELAY, 200)
-        explainList = intent.getSerializableExtra(EXPLAIN_LIST) as List<ExplainBean>?
-        permissions = arrayOfNulls(explainList!!.size)
-        for (i in explainList!!.indices) {
-            permissions[i] = explainList!![i].permission
-        }
+        callback = intent.getSerializableExtra(CALLBACK) as Callback<Boolean>?
+        primitiveExplainList = intent.getSerializableExtra(EXPLAIN_LIST) as MutableList<ExplainBean>
 
-        //请求权限授予状态
+        //处理获取权限字符串数组与展示的使用说明列表
+        hasAllPermission()
+
+        //申请权限
         ActivityCompat.requestPermissions(this, permissions, PERMISSION_REQUEST)
 
-        //正常情况下，权限被拒绝返回的结果比较快，后面直接finish，延时表明已经弹出系统申请弹框，显示“权限使用说明”
-        val task: TimerTask = object : TimerTask() {
-            override fun run() {
-                runOnUiThread { //需要显示才将布局添加进来
-                    val inflate = LayoutInflater.from(this@ExplainPermissionsUtil)
-                        .inflate(R.layout.permissions_explain_dialog, null, false)
-                    inflate.layoutParams = LinearLayout.LayoutParams(
-                        LinearLayout.LayoutParams.MATCH_PARENT,
-                        LinearLayout.LayoutParams.MATCH_PARENT
-                    )
-                    contentView.addView(inflate)
-                    val recyclerView: RecyclerView = inflate.findViewById(R.id.recycler_view)
-                    recyclerView.layoutManager = LinearLayoutManager(this@ExplainPermissionsUtil)
-                    recyclerView.adapter = object : BaseQuickAdapter<ExplainBean?, BaseViewHolder>(
-                        R.layout.item_explain_list,
-                        explainList?.toMutableList()
-                    ) {
-                        override fun convert(holder: BaseViewHolder, item: ExplainBean?) {
-                            holder.setText(R.id.tv_title, item?.title)
-                            holder.setText(R.id.tv_content, item?.content)
-                        }
-                    }
-
-                    val divider = RecyclerViewDivider.Builder(this@ExplainPermissionsUtil)
-                        .setStyle(RecyclerViewDivider.Style.Companion.END)
-                        .setColor(0x00000000)
-                        .setSize(15f)
-                        .build()
-                    recyclerView.addItemDecoration(divider!!)
-
-                    //背景颜色设置白色，覆盖透明主题
-                    contentView.setBackgroundColor(-0x1)
-                }
+        recyclerView = findViewById(R.id.recycler_view)
+        recyclerView.layoutManager = LinearLayoutManager(this@ExplainPermissionsUtil)
+        recyclerView.adapter = object : BaseQuickAdapter<ExplainBean, BaseViewHolder>(
+            R.layout.item_explain_list,
+            explainList.toMutableList()
+        ) {
+            override fun convert(holder: BaseViewHolder, item: ExplainBean) {
+                holder.setText(R.id.tv_title, item.name + "使用说明:")
+                holder.setText(R.id.tv_content, item.explain)
             }
         }
 
-        val timer = Timer()
-        timer.schedule(task, delay)
+        val divider = RecyclerViewDivider.Builder(this@ExplainPermissionsUtil)
+            .setStyle(RecyclerViewDivider.Style.Companion.END)
+            .setColor(0x00000000)
+            .setSize(15f)
+            .build()
+        recyclerView.addItemDecoration(divider)
     }
 
     override fun onResume() {
+        overridePendingTransition(0, 0)
         super.onResume()
         //跳转设置页面回来校验是否已授权
         if (toSetting && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             toSetting = false
-            var hasPermission = true
-            for (permission in permissions) {
-                if (ContextCompat.checkSelfPermission(
-                        this,
-                        permission!!
-                    ) == PackageManager.PERMISSION_DENIED
-                ) {
-                    hasPermission = false
-                    break
-                }
+
+            if (!hasAllPermission()) {
+                //同步刷新未授予的权限使用说明
+                (recyclerView.adapter as BaseQuickAdapter<ExplainBean, BaseViewHolder>).setList(
+                    explainList
+                )
+
+                //重新申请委授予的权限
+                ActivityCompat.requestPermissions(this, permissions, PERMISSION_REQUEST)
             }
-            if (hasPermission) if (null != callback) callback!!.onCallback(true as Nothing) else ActivityCompat.requestPermissions(
-                this,
-                permissions,
-                PERMISSION_REQUEST
-            )
         }
     }
 
@@ -220,122 +179,85 @@ class ExplainPermissionsUtil : AppCompatActivity() {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         //过滤 grantResults.length == 0 是只弹出授权框，未选择点击的情况
         if (requestCode == PERMISSION_REQUEST && grantResults.isNotEmpty()) {
-            var isAllGranted = true
+            var firstAppend = true
+            var sb = StringBuffer("您已拒绝：\"")
+            for ((i, permission) in permissions.withIndex()) {
+                //没有授予的权限
+                if (grantResults[i] != PackageManager.PERMISSION_GRANTED) {
+                    if (!firstAppend)
+                        sb.append("、")
+                    else
+                        firstAppend = false
 
-            //判断是否所有的权限都已经授予了
-            for (grant in grantResults) {
-                if (grant != PackageManager.PERMISSION_GRANTED) {
-                    isAllGranted = false
-                }
-            }
-            if (isAllGranted) {
-                //已全部授予权限
-                if (null != callback) callback!!.onCallback(true as Nothing)
-                toFinish()
-            } else {
-                var shouldShow = true
-                for (permission in permissions) {
-                    if (!ActivityCompat.shouldShowRequestPermissionRationale(
-                            this,
-                            permission
-                        )
-                    ) {
-                        shouldShow = false
-                        break
-                    }
-                }
-
-                //是否可弹出授权框
-                if (shouldShow) {
-                    if (null == refusedDialog || !refusedDialog!!.isShowing) {
-                        refusedDialog =
-                            TitleMsgDialog(this, TitleMsgDialog.Companion.TYPE_YES_OR_NO,
-                                object : Callback<Boolean> {
-                                    override fun onCallback(granted: Boolean) {
-                                        if (!granted) {
-                                            toFinish()
-                                        } else {
-                                            ActivityCompat.requestPermissions(
-                                                this@ExplainPermissionsUtil,
-                                                permissions,
-                                                PERMISSION_REQUEST
-                                            )
-                                        }
-                                    }
-                                })
-                        refusedDialog!!.show()
-                        refusedDialog!!.setText(null, "请授予" + getPermissionsName(grantResults))
-                        refusedDialog!!.setRightButtonText("好的")
-                        refusedDialog!!.setCancelable(false)
-                    }
-                } else if (null == refusedAgainDialog || !refusedAgainDialog!!.isShowing) {
-                    //设置不再询问，跳转设置页面
-                    refusedAgainDialog = TitleMsgDialog(
-                        this,
-                        TitleMsgDialog.Companion.TYPE_YES_OR_NO,
-                        object : Callback<Boolean> {
-                            override fun onCallback(granted: Boolean) {
-                                if (!granted) {
-                                    toFinish()
-                                } else {
-                                    //拒绝不在提示，调设置
-                                    val intent = Intent()
-                                    intent.action = Settings.ACTION_APPLICATION_DETAILS_SETTINGS
-                                    intent.addCategory(Intent.CATEGORY_DEFAULT)
-                                    intent.data = Uri.parse("package:$packageName")
-                                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                    intent.addFlags(Intent.FLAG_ACTIVITY_NO_HISTORY)
-                                    intent.addFlags(Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS)
-                                    startActivity(intent)
-                                    toSetting = true
-                                }
-                            }
-                        })
-                    refusedAgainDialog!!.show()
-                    refusedAgainDialog!!.setText(
-                        null,
-                        "您已拒绝且设置不再询问，请跳转设置页面授予" + getPermissionsName(grantResults)
-                    )
-                    refusedAgainDialog!!.setRightButtonText("好的")
-                    refusedAgainDialog!!.setCancelable(false)
-                }
-            }
-        }
-    }
-
-    private fun toFinish() {
-        finish()
-        //取消页面关闭动画，提升用户体验
-        overridePendingTransition(0, 0)
-    }
-
-    private fun getPermissionsName(grantResults: IntArray): String {
-        var str = "相关权限"
-        if (null == explainList || explainList!!.isEmpty()) {
-            return str
-        }
-        val sb = StringBuffer()
-        for (i in grantResults.indices) {
-            //没有授予的权限
-            if (grantResults[i] != PackageManager.PERMISSION_GRANTED) {
-                val bean = explainList!![i]
-                if (null != bean) {
-                    val title = bean.title
-                    if (!TextUtils.isEmpty(title)) {
-                        try {
-                            //这里就做截取处理吧，权限比较多就不一一匹配了
-                            val split = title!!.split("使用说明".toRegex()).toTypedArray()
-                            if (null != split && split.isNotEmpty()) {
-                                sb.append(split[0])
-                                sb.append("、")
-                            }
-                        } catch (e: Exception) {
+                    for (explainBean in explainList) {
+                        if (permission == explainBean.permission) {
+                            sb.append(explainBean.name)
+                            break
                         }
                     }
                 }
             }
+
+            if (firstAppend) {
+                //已全部授予权限
+                callback?.onCallback(true)
+                toFinish()
+            } else {
+                sb.append("\"，去设置页面打开相应权限")
+                showMsgDialog(sb.toString())
+            }
         }
-        if (sb.isNotEmpty()) str = sb.substring(0, sb.length - 1)
-        return str
+    }
+
+    private fun hasAllPermission(): Boolean {
+        val permissionsList = mutableListOf<String>()
+        val explainList = mutableListOf<ExplainBean>()
+        explainList.addAll(primitiveExplainList)
+        if (explainList.isNotEmpty()) {
+            for (i in explainList.size - 1 downTo 0) {
+                //检验权限是否已授予
+                val permissionCheck =
+                    ContextCompat.checkSelfPermission(this, explainList[i].permission)
+                if (permissionCheck == PackageManager.PERMISSION_GRANTED) {
+                    explainList.removeAt(i)
+                } else {
+                    permissionsList.add(explainList[i].permission)
+                }
+            }
+        }
+
+        if (permissionsList.isEmpty()) {
+            callback?.onCallback(true)
+            toFinish()
+            return true
+        }
+
+        this.explainList = explainList
+        this.permissions = permissionsList.toTypedArray()
+
+        return false
+    }
+
+    private fun toFinish() {
+        finish()
+        //取消页面切换动画，提升用户体验
+        overridePendingTransition(0, 0)
+    }
+
+    private fun showMsgDialog(msg: String?) {
+        val builder = AlertDialog.Builder(this)
+        builder.setTitle("温馨提示")
+        builder.setMessage(msg)
+        builder.setPositiveButton("好的") { dialogInterface, _ ->
+            //引导用户到设置中去开启权限
+            PermissionManagementUtil.goToSetting(this)
+            overridePendingTransition(0, 0)
+            dialogInterface.dismiss()
+            toSetting = true
+        }.setNegativeButton("取消") { dialogInterface, _ ->
+            dialogInterface.dismiss()
+            toFinish()
+        }.show()
+            .setCanceledOnTouchOutside(false)
     }
 }

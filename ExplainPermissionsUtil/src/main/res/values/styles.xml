@@ -1,4 +1,4 @@
-<resources xmlns:tools="http://schemas.android.com/tools">
+<resources>
     <!-- 全屏style -->
     <style name="MyDialogStyle" parent="@android:style/Theme.NoTitleBar.Fullscreen">
         <!-- 是否有边框 -->
@@ -17,8 +17,11 @@
     <!-- 继承Theme.AppCompat.NoActionBar，不显示标题栏-->
     <style name="Transparent" parent="Theme.AppCompat.Light.NoActionBar">
         <!--设置窗口的背景为透明，设置透明背景必须要设置此项-->
-        <item name="android:windowBackground">@android:color/transparent</item>
+        <!--        <item name="android:windowBackground">@android:color/transparent</item>-->
         <!--设置窗口的背景是否为半透明，设置透明背景必须要设置此项-->
+
+        <!--使用这个配置，相当于ExplainPermissionsUtil页面只是浮在外部的MainActivity之上，正常情况下MainActivity并不会走onStop方法，但在跳转到设置里面授予权限后，存在页面被回收的情况，使用该配置，当从设置页面返回ExplainPermissionsUtil被恢复的时候，外部的页面也会跟着恢复执行onCreate()，而后在返回onCallback的回调方法中就可以使用恢复的activity对象来打电话。-->
+        <!--不加该配置的话外部的MainActivity页面只有在从ExplainPermissionsUtil返回到它重新可见前才会被恢复，而回调方法会先于onCreate执行，那么打电话时拿到的activity对象已经被回收了，它的值为null-->
         <item name="android:windowIsTranslucent">true</item>
     </style>
 

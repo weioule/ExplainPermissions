@@ -27,5 +27,5 @@
         android:textSize="14sp"
         app:layout_constraintLeft_toLeftOf="parent"
         app:layout_constraintTop_toBottomOf="@+id/tv_title"
-        tools:text="清美鲜到想要拨打电话权限，用于您给配送客服拨打电话" />
+        tools:text="我们想要拨打电话权限，用于您给配送客服拨打电话" />
 </androidx.constraintlayout.widget.ConstraintLayout>

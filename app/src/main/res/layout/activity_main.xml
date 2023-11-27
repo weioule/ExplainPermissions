@@ -12,9 +12,8 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:background="#5f0f"
-        android:onClick="onClick"
         android:padding="10dp"
-        android:text="请求打电话权限" />
+        android:text="申请拨打电话权限" />
 
     <TextView
         android:id="@+id/tv2"
@@ -22,8 +21,16 @@
         android:layout_height="wrap_content"
         android:layout_marginTop="20dp"
         android:background="#50f0"
-        android:onClick="onClick"
         android:padding="10dp"
-        android:text="请求定位、打电话权限" />
+        android:text="申请定位、相机、拨打电话权限" />
+
+    <TextView
+        android:id="@+id/tv3"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="20dp"
+        android:background="#5ff0"
+        android:padding="10dp"
+        android:text="申请定位权限" />
 
 </LinearLayout>
