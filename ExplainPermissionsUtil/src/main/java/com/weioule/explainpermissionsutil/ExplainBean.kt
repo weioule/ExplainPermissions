@@ -10,11 +10,11 @@ import java.io.Serializable
 class ExplainBean : Serializable {
     var name: String = "" //权限名称
     var explain: String = "" //权限使用说明内容
-    var permission: String = ""//权限标识
+    var permissions: MutableList<String> = mutableListOf()//权限标识组
 
-    constructor(permission: String, title: String, content: String) {
+    constructor(title: String, content: String, vararg permissions: String) {
         this.name = title
         this.explain = content
-        this.permission = permission
+        this.permissions = permissions.toMutableList()
     }
 }

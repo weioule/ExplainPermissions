@@ -6,6 +6,8 @@ import android.content.pm.PackageManager
 import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
+import android.os.Process
+import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
 import androidx.annotation.RequiresApi
@@ -19,6 +21,7 @@ import com.chad.library.adapter.base.BaseQuickAdapter
 import com.chad.library.adapter.base.viewholder.BaseViewHolder
 import java.io.Serializable
 import java.util.Calendar
+import kotlin.system.exitProcess
 
 /**
  * Author by weioule.
@@ -33,6 +36,7 @@ class ExplainPermissionsUtil : AppCompatActivity() {
     private lateinit var permissions: Array<String>
     private lateinit var recyclerView: RecyclerView
     private var callback: Callback<Boolean>? = null
+    private lateinit var intercept: Intercept
 
     //用于展示未授予的权限列表数据
     private var explainList: MutableList<ExplainBean> = mutableListOf()
@@ -43,23 +47,26 @@ class ExplainPermissionsUtil : AppCompatActivity() {
     companion object {
         private var lastClickTime: Long = 0
         private const val MIN_CLICK_DELAY_TIME = 800
-        private const val CALLBACK = "callback"
+        private const val INTERCEPT = "intercept"
         private const val EXPLAIN_LIST = "explain_list"
+        private var callback: Callback<Boolean>? = null
 
         @JvmOverloads
         fun requestPermission(
             activity: FragmentActivity,
+            intercept: Intercept,
             bean: ExplainBean,
             callback: Callback<Boolean>?
         ) {
             var permissionList = mutableListOf<ExplainBean>()
             permissionList.add(bean)
-            requestPermissions(activity, permissionList, callback)
+            requestPermissions(activity, intercept, permissionList, callback)
         }
 
         @JvmOverloads
         fun requestPermissions(
             activity: FragmentActivity,
+            intercept: Intercept,
             permissionList: MutableList<ExplainBean>,
             callback: Callback<Boolean>?
         ) {
@@ -72,27 +79,11 @@ class ExplainPermissionsUtil : AppCompatActivity() {
                     throw RuntimeException("The permission list cannot be empty.")
                 }
 
-                var hasAllPermission = true
-                for (explainBean in permissionList) {
-                    val permissionCheck =
-                        ContextCompat.checkSelfPermission(activity, explainBean.permission)
-                    if (permissionCheck == PackageManager.PERMISSION_DENIED) {
-                        hasAllPermission = false
-                        break
-                    }
-                }
-
-                //检验权限是否已授予
-                if (hasAllPermission) {
-                    callback?.onCallback(true)
-                    return
-                }
-
                 val intent = Intent(activity, ExplainPermissionsUtil::class.java)
                 val bundle = Bundle()
-                //这里需要注意：callback需要序列化，在外部使用匿名内部类的形式传进来的callback，因为它持有外部类的引用，外部类也需要序列化，不然会传递不过去，所以我们的MainActivity也实现了Serializable接口
-                bundle.putSerializable(CALLBACK, callback as Serializable?)
                 bundle.putSerializable(EXPLAIN_LIST, permissionList as Serializable?)
+                bundle.putSerializable(INTERCEPT, intercept as Serializable?)
+                this.callback = callback
 
                 intent.putExtras(bundle)
                 activity.startActivity(intent)
@@ -107,48 +98,67 @@ class ExplainPermissionsUtil : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         //设置状态栏透明
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            val window = window
-            window.clearFlags(
-                WindowManager.LayoutParams.FLAG_TRANSLUCENT_STATUS
-                        or WindowManager.LayoutParams.FLAG_TRANSLUCENT_NAVIGATION
-            )
-            window.decorView.systemUiVisibility = (View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
-                    or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
-                    or View.SYSTEM_UI_FLAG_LAYOUT_STABLE)
+            window.clearFlags(WindowManager.LayoutParams.FLAG_TRANSLUCENT_STATUS)
             window.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS)
+            val option = View.SYSTEM_UI_FLAG_LAYOUT_STABLE or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+            val vis = window.decorView.systemUiVisibility
+            window.decorView.systemUiVisibility = option or vis
             window.statusBarColor = Color.TRANSPARENT
-            window.navigationBarColor = Color.TRANSPARENT
+        } else {
+            window.addFlags(WindowManager.LayoutParams.FLAG_TRANSLUCENT_STATUS)
         }
 
-        setContentView(R.layout.permissions_explain_activity)
+        //设置透明导航栏
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.JELLY_BEAN) return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            window.isNavigationBarContrastEnforced = false
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            window.navigationBarColor = Color.TRANSPARENT
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
+            if (window.attributes.flags and WindowManager.LayoutParams.FLAG_TRANSLUCENT_NAVIGATION === 0) {
+                window.addFlags(WindowManager.LayoutParams.FLAG_TRANSLUCENT_NAVIGATION)
+            }
+        }
+        val decorView = window.decorView
+        val vis = decorView.systemUiVisibility
+        val option =
+            View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+        decorView.systemUiVisibility = vis or option
 
-        callback = intent.getSerializableExtra(CALLBACK) as Callback<Boolean>?
+
+        intercept = intent.getSerializableExtra(INTERCEPT) as Intercept
         primitiveExplainList = intent.getSerializableExtra(EXPLAIN_LIST) as MutableList<ExplainBean>
 
-        //处理获取权限字符串数组与展示的使用说明列表
-        hasAllPermission()
+        //处理权限字符串数组与展示的使用说明列表
+        if (hasAllPermission())
+            return
 
         //申请权限
         ActivityCompat.requestPermissions(this, permissions, PERMISSION_REQUEST)
 
-        recyclerView = findViewById(R.id.recycler_view)
-        recyclerView.layoutManager = LinearLayoutManager(this@ExplainPermissionsUtil)
-        recyclerView.adapter = object : BaseQuickAdapter<ExplainBean, BaseViewHolder>(
-            R.layout.item_explain_list,
-            explainList.toMutableList()
-        ) {
-            override fun convert(holder: BaseViewHolder, item: ExplainBean) {
-                holder.setText(R.id.tv_title, item.name + "使用说明:")
-                holder.setText(R.id.tv_content, item.explain)
-            }
-        }
+        if (intercept != Intercept.NORMAL) {
+            setContentView(R.layout.permissions_explain_activity)
 
-        val divider = RecyclerViewDivider.Builder(this@ExplainPermissionsUtil)
-            .setStyle(RecyclerViewDivider.Style.Companion.END)
-            .setColor(0x00000000)
-            .setSize(15f)
-            .build()
-        recyclerView.addItemDecoration(divider)
+            recyclerView = findViewById(R.id.recycler_view)
+            recyclerView.layoutManager = LinearLayoutManager(this@ExplainPermissionsUtil)
+            recyclerView.adapter = object : BaseQuickAdapter<ExplainBean, BaseViewHolder>(
+                R.layout.item_explain_list,
+                explainList.toMutableList()
+            ) {
+                override fun convert(holder: BaseViewHolder, item: ExplainBean) {
+                    holder.setText(R.id.tv_title, item.name + "使用说明:")
+                    holder.setText(R.id.tv_content, item.explain)
+                }
+            }
+
+            val divider = RecyclerViewDivider.Builder(this@ExplainPermissionsUtil)
+                .setStyle(RecyclerViewDivider.Style.Companion.END)
+                .setColor(0x00000000)
+                .setSize(15f)
+                .build()
+            recyclerView.addItemDecoration(divider)
+        }
     }
 
     override fun onResume() {
@@ -179,30 +189,53 @@ class ExplainPermissionsUtil : AppCompatActivity() {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         //过滤 grantResults.length == 0 是只弹出授权框，未选择点击的情况
         if (requestCode == PERMISSION_REQUEST && grantResults.isNotEmpty()) {
-            var firstAppend = true
-            var sb = StringBuffer("您已拒绝：\"")
-            for ((i, permission) in permissions.withIndex()) {
-                //没有授予的权限
-                if (grantResults[i] != PackageManager.PERMISSION_GRANTED) {
-                    if (!firstAppend)
-                        sb.append("、")
-                    else
-                        firstAppend = false
-
-                    for (explainBean in explainList) {
-                        if (permission == explainBean.permission) {
-                            sb.append(explainBean.name)
-                            break
-                        }
+            //判断是否所有的权限都已经授予了
+            val unGranted = ArrayList<Int>()
+            var shouldShow: Boolean? = null
+            for ((position, grant) in grantResults.withIndex()) {
+                if (grant == PackageManager.PERMISSION_DENIED) {
+                    if (intercept == Intercept.NORMAL) {
+                        //不需要弹框级别的在这里就直接返回了
+                        Companion.callback?.onCallback(false)
+                        toFinish()
+                        return
                     }
+
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                        shouldShow = shouldShowRequestPermissionRationale(permissions[position])
+                    }
+
+                    unGranted.add(position)
                 }
             }
 
-            if (firstAppend) {
+            if (unGranted.size == 0) {
                 //已全部授予权限
-                callback?.onCallback(true)
+                Companion.callback?.onCallback(true)
+                toFinish()
+            } else if (intercept == Intercept.LOW && (shouldShow == null || shouldShow == true)) {
+                //LOW级别，未设置不再提示，就不弹框
                 toFinish()
             } else {
+                var firstAppend = true
+                var sb = StringBuffer("您未授予：\"")
+                label1@ for (i in unGranted) {
+                    for (explainBean in explainList) {
+                        //没有授予的权限
+                        if (explainBean.permissions.contains(permissions[i])) {
+                            if (firstAppend) {
+                                firstAppend = false
+                                sb.append(explainBean.name)
+                            } else if (!sb.contains(explainBean.name)) {
+                                sb.append("、")
+                                sb.append(explainBean.name)
+                            }
+
+                            continue@label1
+                        }
+                    }
+                }
+
                 sb.append("\"，去设置页面打开相应权限")
                 showMsgDialog(sb.toString())
             }
@@ -210,23 +243,22 @@ class ExplainPermissionsUtil : AppCompatActivity() {
     }
 
     private fun hasAllPermission(): Boolean {
+        explainList.clear()
         val permissionsList = mutableListOf<String>()
-        val explainList = mutableListOf<ExplainBean>()
-        explainList.addAll(primitiveExplainList)
-        if (explainList.isNotEmpty()) {
-            for (i in explainList.size - 1 downTo 0) {
+        label1@ for (explainBean in primitiveExplainList) {
+            for (permission in explainBean.permissions) {
                 //检验权限是否已授予
                 val permissionCheck =
-                    ContextCompat.checkSelfPermission(this, explainList[i].permission)
-                if (permissionCheck == PackageManager.PERMISSION_GRANTED) {
-                    explainList.removeAt(i)
-                } else {
-                    permissionsList.add(explainList[i].permission)
+                    ContextCompat.checkSelfPermission(this, permission)
+                if (permissionCheck == PackageManager.PERMISSION_DENIED) {
+                    explainList.add(explainBean)
+                    permissionsList.addAll(explainBean.permissions)
+                    continue@label1
                 }
             }
         }
 
-        if (permissionsList.isEmpty()) {
+        if (explainList.isEmpty()) {
             callback?.onCallback(true)
             toFinish()
             return true
@@ -248,16 +280,51 @@ class ExplainPermissionsUtil : AppCompatActivity() {
         val builder = AlertDialog.Builder(this)
         builder.setTitle("温馨提示")
         builder.setMessage(msg)
-        builder.setPositiveButton("好的") { dialogInterface, _ ->
+        var dialog = builder.setPositiveButton("好的") { dialogInterface, _ ->
             //引导用户到设置中去开启权限
             PermissionManagementUtil.goToSetting(this)
             overridePendingTransition(0, 0)
             dialogInterface.dismiss()
             toSetting = true
         }.setNegativeButton("取消") { dialogInterface, _ ->
-            dialogInterface.dismiss()
-            toFinish()
+            if (intercept == Intercept.HIGH) {
+                try {
+                    Process.killProcess(Process.myPid())
+                    exitProcess(0)
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            } else {
+                dialogInterface.dismiss()
+                toFinish()
+            }
         }.show()
-            .setCanceledOnTouchOutside(false)
+
+        //调整蒙版的灰度
+        dialog.window?.attributes?.dimAmount = 0f
+
+        dialog.setCancelable(false)
+
+        //解决部分红米手机不居中或显示不全的问题
+        //放在show()之后，不然有些属性是没有效果的，比如height和width
+        dialog.window?.run {
+            attributes = attributes.apply {
+                width = (windowManager.defaultDisplay.width * 0.95).toInt()
+                gravity = Gravity.CENTER
+            }
+        }
     }
+
+
+    /**
+     * 拦权限截级别
+     * HIGH         必须授予权限，不允许返回，否则将不允许使用App（拒绝后弹提示框，点击取消会杀死程序）
+     * MEDIUM       必须授予权限才能往下执行，但允许返回（拒绝后弹提示框，可以点取消）
+     * LOW          可以不授予权限（拒绝并不再提醒后才弹提示框，可以点取消）
+     * NORMAL       不展示权限说明（拒绝后不弹提示框）
+     */
+    enum class Intercept : Serializable {
+        HIGH, MEDIUM, LOW, NORMAL
+    }
+
 }
