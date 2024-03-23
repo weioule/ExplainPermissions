@@ -1,8 +1,6 @@
 package com.weioule.explainpermissions;
 
 import android.Manifest;
-import android.content.Intent;
-import android.net.Uri;
 import android.os.Bundle;
 import android.view.View;
 import android.widget.Toast;
@@ -14,8 +12,6 @@ import androidx.fragment.app.FragmentActivity;
 import com.weioule.explainpermissionsutil.Callback;
 import com.weioule.explainpermissionsutil.ExplainBean;
 import com.weioule.explainpermissionsutil.ExplainPermissionsUtil;
-
-import java.util.ArrayList;
 
 /**
  * Created by weioule
@@ -36,78 +32,82 @@ public class JavaMainActivity extends AppCompatActivity {
         findViewById(R.id.tv1).setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View view) {
-                ExplainPermissionsUtil.Companion.requestPermission(JavaMainActivity.this, ExplainPermissionsUtil.Intercept.NORMAL, new ExplainBean(
-                        "拨打电话权限",
-                        "我们想要拨打电话权限，用于您给客服小姐姐拨打电话哦;",
-                        Manifest.permission.CALL_PHONE
-                ), new Callback<Boolean>() {
-                    @Override
-                    public void onCallback(Boolean granted) {
-                        if (granted)
-                            toCall();
-                    }
-                });
+                ExplainPermissionsUtil.Companion.requestPermissions(activity,
+                        ExplainPermissionsUtil.Intercept.NORMAL,
+                        new Callback<Boolean>() {
+                            @Override
+                            public void onCallback(Boolean granted) {
+                                Toast.makeText(
+                                        JavaMainActivity.this,
+                                        granted ? "已授予权限" : "未授予权限",
+                                        Toast.LENGTH_SHORT
+                                ).show();
+                            }
+                        },
+                        new ExplainBean(
+                                "拨打电话权限",
+                                "我们想要拨打电话权限，用于您给客服小姐姐拨打电话哦;",
+                                Manifest.permission.CALL_PHONE
+                        ));
             }
         });
 
         findViewById(R.id.tv2).setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View view) {
-                ArrayList<ExplainBean> list = new ArrayList<>();
-                list.add(
+                ExplainPermissionsUtil.Companion.requestPermissions(activity,
+                        ExplainPermissionsUtil.Intercept.LOW,
+                        new Callback<Boolean>() {
+                            @Override
+                            public void onCallback(Boolean granted) {
+                                Toast.makeText(
+                                        JavaMainActivity.this,
+                                        granted ? "已全部授予权限" : "未全部授予权限",
+                                        Toast.LENGTH_SHORT
+                                ).show();
+                            }
+                        },
+                        new ExplainBean(
+                                "拨打电话权限",
+                                "我们想要拨打电话权限，用于您给客服小姐姐拨打电话哦;",
+                                Manifest.permission.CALL_PHONE
+                        ),
                         new ExplainBean(
                                 "位置信息权限",
                                 "我们想要访问你的位置，用于为您提供更好的服务哦;",
                                 Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION
-                        )
-                );
-                list.add(
+                        ),
                         new ExplainBean(
                                 "相机权限",
                                 "我们想要相机权限，用于您在与客服小姐姐沟通时可以视频通话哦;",
                                 Manifest.permission.CAMERA
                         )
                 );
-                list.add(
-                        new ExplainBean(
-                                "拨打电话权限",
-                                "我们想要拨打电话权限，用于您给客服小姐姐拨打电话哦;",
-                                Manifest.permission.CALL_PHONE
-                        )
-                );
-
-                ExplainPermissionsUtil.Companion.requestPermissions(activity, ExplainPermissionsUtil.Intercept.LOW, list, new Callback<Boolean>() {
-                    @Override
-                    public void onCallback(Boolean granted) {
-                        if (granted)
-                            toCall();
-                    }
-                });
             }
         });
 
         findViewById(R.id.tv3).setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View view) {
-                ExplainPermissionsUtil.Companion.requestPermission(activity, ExplainPermissionsUtil.Intercept.MEDIUM, new ExplainBean(
-                        "位置信息权限",
-                        "我们想要访问你的位置，用于为您提供更好的服务哦;",
-                        Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION
-                ), new Callback<Boolean>() {
-                    @Override
-                    public void onCallback(Boolean granted) {
-                        Toast.makeText(activity, "定位权限获取到了", Toast.LENGTH_SHORT).show();
-                    }
-                });
+                ExplainPermissionsUtil.Companion.requestPermissions(activity,
+                        ExplainPermissionsUtil.Intercept.MEDIUM,
+                        new Callback<Boolean>() {
+                            @Override
+                            public void onCallback(Boolean granted) {
+                                Toast.makeText(
+                                        JavaMainActivity.this,
+                                        granted ? "已授予权限" : "未授予权限",
+                                        Toast.LENGTH_SHORT
+                                ).show();
+                            }
+                        },
+                        new ExplainBean(
+                                "位置信息权限",
+                                "我们想要访问你的位置，用于为您提供更好的服务哦;",
+                                Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION
+                        ));
             }
         });
-    }
-
-    private void toCall() {
-        Intent intent = new Intent(Intent.ACTION_CALL);
-        Uri data = Uri.parse("tel:18888888888");
-        intent.setData(data);
-        activity.startActivity(intent);
     }
 
 }

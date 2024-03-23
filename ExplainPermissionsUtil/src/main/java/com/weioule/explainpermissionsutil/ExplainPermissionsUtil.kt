@@ -6,10 +6,12 @@ import android.content.pm.PackageManager
 import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
+import android.os.Parcelable
 import android.os.Process
 import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
+import android.widget.RelativeLayout
 import androidx.annotation.RequiresApi
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
@@ -17,8 +19,6 @@ import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
-import com.chad.library.adapter.base.BaseQuickAdapter
-import com.chad.library.adapter.base.viewholder.BaseViewHolder
 import java.io.Serializable
 import java.util.Calendar
 import kotlin.system.exitProcess
@@ -32,60 +32,52 @@ class ExplainPermissionsUtil : AppCompatActivity() {
     private val PERMISSION_REQUEST = 18118
     private var toSetting = false
 
-    //需要申请的权限字符串数组
-    private lateinit var permissions: Array<String>
-    private lateinit var recyclerView: RecyclerView
-    private var callback: Callback<Boolean>? = null
     private lateinit var intercept: Intercept
+
+    //需要申请的权限字符串数组
+    private var permissions: Array<String> = arrayOf()
 
     //用于展示未授予的权限列表数据
     private var explainList: MutableList<ExplainBean> = mutableListOf()
 
     //原始的列表数据，因为跳转系统设置页面可以授予也可以取消权限，用于返回页面时同步更新所有权限状态
-    private var primitiveExplainList: MutableList<ExplainBean> = mutableListOf()
+    private var primitiveExplainArray: Array<out Parcelable>? = arrayOf()
+
+    private lateinit var recyclerView: RecyclerView
+    private lateinit var content: RelativeLayout
 
     companion object {
         private var lastClickTime: Long = 0
         private const val MIN_CLICK_DELAY_TIME = 800
         private const val INTERCEPT = "intercept"
-        private const val EXPLAIN_LIST = "explain_list"
+        private const val EXPLAIN_ARRAY = "explain_array"
         private var callback: Callback<Boolean>? = null
-
-        @JvmOverloads
-        fun requestPermission(
-            activity: FragmentActivity,
-            intercept: Intercept,
-            bean: ExplainBean,
-            callback: Callback<Boolean>?
-        ) {
-            var permissionList = mutableListOf<ExplainBean>()
-            permissionList.add(bean)
-            requestPermissions(activity, intercept, permissionList, callback)
-        }
 
         @JvmOverloads
         fun requestPermissions(
             activity: FragmentActivity,
             intercept: Intercept,
-            permissionList: MutableList<ExplainBean>,
-            callback: Callback<Boolean>?
+            callback: Callback<Boolean>?,
+            vararg permissions: ExplainBean
         ) {
             //过滤重复点击
             val currentTime = Calendar.getInstance().timeInMillis
             if (currentTime - lastClickTime > MIN_CLICK_DELAY_TIME) {
                 lastClickTime = currentTime
 
-                if (permissionList.isNullOrEmpty()) {
+                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+                    callback?.onCallback(true)
+                    return
+                }
+
+                if (permissions.isNullOrEmpty()) {
                     throw RuntimeException("The permission list cannot be empty.")
                 }
 
-                val intent = Intent(activity, ExplainPermissionsUtil::class.java)
-                val bundle = Bundle()
-                bundle.putSerializable(EXPLAIN_LIST, permissionList as Serializable?)
-                bundle.putSerializable(INTERCEPT, intercept as Serializable?)
                 this.callback = callback
-
-                intent.putExtras(bundle)
+                val intent = Intent(activity, ExplainPermissionsUtil::class.java)
+                intent.putExtra(EXPLAIN_ARRAY, permissions)
+                intent.putExtra(INTERCEPT, intercept)
                 activity.startActivity(intent)
 
                 //取消页面启动动画，提升用户体验
@@ -128,7 +120,7 @@ class ExplainPermissionsUtil : AppCompatActivity() {
 
 
         intercept = intent.getSerializableExtra(INTERCEPT) as Intercept
-        primitiveExplainList = intent.getSerializableExtra(EXPLAIN_LIST) as MutableList<ExplainBean>
+        primitiveExplainArray = intent.getParcelableArrayExtra(EXPLAIN_ARRAY)
 
         //处理权限字符串数组与展示的使用说明列表
         if (hasAllPermission())
@@ -140,24 +132,10 @@ class ExplainPermissionsUtil : AppCompatActivity() {
         if (intercept != Intercept.NORMAL) {
             setContentView(R.layout.permissions_explain_activity)
 
+            content = findViewById(R.id.content)
             recyclerView = findViewById(R.id.recycler_view)
             recyclerView.layoutManager = LinearLayoutManager(this@ExplainPermissionsUtil)
-            recyclerView.adapter = object : BaseQuickAdapter<ExplainBean, BaseViewHolder>(
-                R.layout.item_explain_list,
-                explainList.toMutableList()
-            ) {
-                override fun convert(holder: BaseViewHolder, item: ExplainBean) {
-                    holder.setText(R.id.tv_title, item.name + "使用说明:")
-                    holder.setText(R.id.tv_content, item.explain)
-                }
-            }
-
-            val divider = RecyclerViewDivider.Builder(this@ExplainPermissionsUtil)
-                .setStyle(RecyclerViewDivider.Style.Companion.END)
-                .setColor(0x00000000)
-                .setSize(15f)
-                .build()
-            recyclerView.addItemDecoration(divider)
+            recyclerView.adapter = ExplainAdapter(this, explainList.toMutableList())
         }
     }
 
@@ -170,9 +148,7 @@ class ExplainPermissionsUtil : AppCompatActivity() {
 
             if (!hasAllPermission()) {
                 //同步刷新未授予的权限使用说明
-                (recyclerView.adapter as BaseQuickAdapter<ExplainBean, BaseViewHolder>).setList(
-                    explainList
-                )
+                (recyclerView.adapter as ExplainAdapter)?.replaceData(explainList)
 
                 //重新申请委授予的权限
                 ActivityCompat.requestPermissions(this, permissions, PERMISSION_REQUEST)
@@ -245,7 +221,8 @@ class ExplainPermissionsUtil : AppCompatActivity() {
     private fun hasAllPermission(): Boolean {
         explainList.clear()
         val permissionsList = mutableListOf<String>()
-        label1@ for (explainBean in primitiveExplainList) {
+        primitiveExplainArray?.forEach {
+            val explainBean: ExplainBean = it as ExplainBean
             for (permission in explainBean.permissions) {
                 //检验权限是否已授予
                 val permissionCheck =
@@ -253,7 +230,7 @@ class ExplainPermissionsUtil : AppCompatActivity() {
                 if (permissionCheck == PackageManager.PERMISSION_DENIED) {
                     explainList.add(explainBean)
                     permissionsList.addAll(explainBean.permissions)
-                    continue@label1
+                    break
                 }
             }
         }
@@ -264,7 +241,6 @@ class ExplainPermissionsUtil : AppCompatActivity() {
             return true
         }
 
-        this.explainList = explainList
         this.permissions = permissionsList.toTypedArray()
 
         return false
@@ -310,7 +286,11 @@ class ExplainPermissionsUtil : AppCompatActivity() {
         dialog.window?.run {
             attributes = attributes.apply {
                 width = (windowManager.defaultDisplay.width * 0.95).toInt()
-                gravity = Gravity.CENTER
+                //权限说明列表高度 = recyclerView + 顶部内边距50dp
+                val height = recyclerView.height + dp2px(50f)
+                //判断权限说明列表是否大于屏幕中心点 - 预估的弹框高度的一半，大于的话就显示在底部，反之居中显示
+                gravity =
+                    if (height > content.height / 2 - dp2px(65f)) Gravity.BOTTOM else Gravity.CENTER
             }
         }
     }
@@ -318,13 +298,17 @@ class ExplainPermissionsUtil : AppCompatActivity() {
 
     /**
      * 拦权限截级别
-     * HIGH         必须授予权限，不允许返回，否则将不允许使用App（拒绝后弹提示框，点击取消会杀死程序）
-     * MEDIUM       必须授予权限才能往下执行，但允许返回（拒绝后弹提示框，可以点取消）
-     * LOW          可以不授予权限（拒绝并不再提醒后才弹提示框，可以点取消）
-     * NORMAL       不展示权限说明（拒绝后不弹提示框）
+     * NORMAL       不展示权限说明，拒绝后不弹提示框
+     * LOW          展示权限说明，拒绝并不再提醒后弹提示框，可以点取消
+     * MEDIUM       展示权限说明，拒绝后弹提示框，可以点取消
+     * HIGH         展示权限说明，必须授予权限，拒绝权限后弹出提示框，点击取消会退出程序
      */
     enum class Intercept : Serializable {
-        HIGH, MEDIUM, LOW, NORMAL
+        NORMAL, LOW, MEDIUM, HIGH
     }
 
+    fun dp2px(dp: Float): Float {
+        val scale = resources.displayMetrics.density
+        return dp * scale + 0.5f
+    }
 }

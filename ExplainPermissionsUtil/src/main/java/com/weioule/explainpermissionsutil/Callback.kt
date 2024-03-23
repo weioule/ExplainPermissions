@@ -1,11 +1,9 @@
 package com.weioule.explainpermissionsutil
 
-import java.io.Serializable
-
 /**
  * Author by weioule.
  * Date on 2022/10/15.
  */
-interface Callback<T> : Serializable {
+interface Callback<T> {
     fun onCallback(granted: T)
 }
