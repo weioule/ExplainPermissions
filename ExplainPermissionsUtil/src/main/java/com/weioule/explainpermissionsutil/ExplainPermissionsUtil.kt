@@ -190,6 +190,7 @@ class ExplainPermissionsUtil : AppCompatActivity() {
                 Companion.callback?.onCallback(true)
                 toFinish()
             } else if (intercept == Intercept.LOW && (shouldShow == null || shouldShow == true)) {
+                Companion.callback?.onCallback(false)
                 //LOW级别，未设置不再提示，就不弹框
                 toFinish()
             } else {
@@ -213,7 +214,7 @@ class ExplainPermissionsUtil : AppCompatActivity() {
                 }
 
                 sb.append("\"，去设置页面打开相应权限")
-                showMsgDialog(sb.toString())
+                showMsgDialog(sb.toString(), callback)
             }
         }
     }
@@ -252,7 +253,7 @@ class ExplainPermissionsUtil : AppCompatActivity() {
         overridePendingTransition(0, 0)
     }
 
-    private fun showMsgDialog(msg: String?) {
+    private fun showMsgDialog(msg: String?, callback: Callback<Boolean>?) {
         val builder = AlertDialog.Builder(this)
         builder.setTitle("温馨提示")
         builder.setMessage(msg)
@@ -272,6 +273,7 @@ class ExplainPermissionsUtil : AppCompatActivity() {
                 }
             } else {
                 dialogInterface.dismiss()
+                callback?.onCallback(false)
                 toFinish()
             }
         }.show()
